@@ -1,0 +1,109 @@
+seed: 42
+
+data:
+  x:
+    # 支持 nc / npy / npz / csv / parquet / 目录
+    path: examples/data/x.nc
+    variables: [tas, pr, huss]
+  y:
+    path: examples/data/y.nc
+    variables: [obs]
+  time_name: time
+  lat_name: lat
+  lon_name: lon
+  regrid: nearest   # nearest | linear | none
+  join_time: inner  # inner | nearest
+
+preprocess:
+  x:
+    detrend: false
+    deseasonalize: false
+    anomaly: false
+    standardize: false
+    climatology: month   # month | dayofyear
+  y:
+    detrend: false
+    deseasonalize: false
+    anomaly: false
+    standardize: false
+    climatology: month
+
+x_transform:
+  mode: raw          # raw | lag | pca | lag_pca
+  lags: [1, 2]
+  pca_n_components: 0.95
+  pca_whiten: false
+  table_pca: false   # true 时在摊平后的特征表上再做 PCA
+
+feature_selection:
+  methods:
+    - collinearity
+    - pairwise_importance
+    # permutation / rfe 较慢，需要时再打开
+    # - permutation
+    # - rfe
+  collinearity:
+    corr_threshold: 0.9
+    vif_threshold: 10.0
+    linreg_r2_threshold: 0.95
+  pairwise_importance:
+    corr_threshold: 0.8
+  permutation:
+    n_repeats: 5
+    drop_below: 0.0
+    max_rounds: 20
+  rfe:
+    n_features_to_select: null
+    step: 1
+    cv: 3
+
+split:
+  method: time            # time | space | time_window | random | extreme
+  test_size: 0.2
+  time:
+    train_end: null       # 可写时间字符串；null 则按 test_size 切末段
+  space:
+    mode: lon_band        # lon_band | lat_band | block | checkerboard
+    n_blocks: 4
+  time_window:
+    n_splits: 3
+    test_span: 12         # 以 time 步计
+    expanding: true
+  extreme:
+    quantile: 0.9
+    hold_extremes_as: test  # test | train
+
+sampling:
+  method: random          # random | stratified | fscs | clhs | kennard_stone | cluster | spatial | systematic
+  n_samples: null         # null 表示用全部训练样本
+  n_bins: 10
+  n_clusters: 50
+
+model:
+  name: extra_trees       # rf | extra_trees | hist_gbm | xgboost | lightgbm | lightgbm_rf
+  params:
+    n_estimators: 200
+    max_depth: 12
+    n_jobs: -1
+    random_state: 42
+
+predict:
+  restore_cube: true
+
+explain:
+  rf_importance: true
+  permutation_importance: true
+  permutation_n_repeats: 5
+  shap:
+    enabled: true
+    method: auto          # auto | treeshap | fasttreeshap | kernel | permutation | sampling
+    algorithm: v2         # FastTreeSHAP: v1 | v2 | auto
+    max_samples: 2000     # 加速：只解释子集，其余格点为 NaN
+    background_size: 100
+    n_jobs: -1
+  ale: true
+  ice_pdp: true
+  ice_n_samples: 50
+  pdp_grid: 20
+
+output_dir: outputs/demo
