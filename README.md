@@ -1,5 +1,6 @@
 # RF_SHAP_ESMValTool (`rf_shap`)
 
+Created by Feini Huang (feini.huang@uv.es)
 Python toolkit for diagnosing **input–output relationships** between **Earth-system model fields** (CMIP6-like data cubes, as used with ESMValTool-style workflows) and **observations**. Tree ensembles map collocated predictors \(X\) to a target \(Y\); SHAP and related methods explain that mapping in space and time.
 
 **Repository:** https://github.com/feinihuang9554-max/RF_SHAP_ESMValTool
