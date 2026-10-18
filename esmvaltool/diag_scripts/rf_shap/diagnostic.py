@@ -342,12 +342,12 @@ def fit_from_cfg(cfg):
 _COMPARISON_PLOTS = {
     "ale_distance": {
         "value_col": "distance",
-        "caption": "ALE curve distance of each driver: process model versus FluxCom/ERA5",
+        "caption": "ALE curve distance of each driver: process model versus observations",
         "xlabel": "ALE RMSE (model vs observations)",
     },
     "dependence_distance": {
         "value_col": "distance",
-        "caption": "SHAP dependence-curve distance of each driver: process model versus FluxCom/ERA5",
+        "caption": "SHAP dependence-curve distance of each driver: process model versus observations",
         "xlabel": "dependence-curve RMSE (model vs observations)",
     },
     "slope_difference": {
@@ -357,7 +357,7 @@ _COMPARISON_PLOTS = {
     },
     "interaction_distance": {
         "value_col": "distance",
-        "caption": "SHAP interaction-curve distance: process model versus FluxCom/ERA5",
+        "caption": "SHAP interaction-curve distance: process model versus observations",
         "xlabel": "interaction-curve RMSE (model vs observations)",
     },
 }

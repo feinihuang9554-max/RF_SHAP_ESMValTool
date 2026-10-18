@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEMO = ROOT / "esmvaltool" / "recipes" / "recipe_rf_shap_demo.yml"
 CMIP = ROOT / "esmvaltool" / "recipes" / "recipe_rf_shap.yml"
 GPP = ROOT / "esmvaltool" / "recipes" / "recipe_rf_shap_gpp.yml"
+CLOUD = ROOT / "esmvaltool" / "recipes" / "recipe_rf_shap_cloud.yml"
 
 
 def test_demo_recipe_needs_no_datasets():
@@ -44,3 +45,15 @@ def test_gpp_recipe_is_cmor_access_esm():
     assert extra["gpp"] == ["FLUXCOM"]
     assert extra["tas"] == ["ERA5"]
     assert extra["pr"] == ["ERA5"]
+
+
+def test_cloud_recipe_is_cmor_access_esm_clt():
+    recipe = yaml.safe_load(CLOUD.read_text())
+    script = recipe["diagnostics"]["rf_shap"]["scripts"]["rf_shap"]
+    variables = recipe["diagnostics"]["rf_shap"]["variables"]
+    assert script["target"] == "clt"
+    assert script["predictors"] == ["tas", "hurs", "rsds"]
+    assert variables["clt"]["mip"] == "Amon"
+    assert recipe["datasets"][0]["dataset"] == "ACCESS-ESM1-5"
+    assert script["reference"]["predictor_dataset"] == "ERA5"
+    assert script["reference"]["target_dataset"] == "ERA5"
