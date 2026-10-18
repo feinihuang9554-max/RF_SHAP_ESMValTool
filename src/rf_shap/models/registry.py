@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from sklearn.ensemble import ExtraTreesRegressor, RandomForestRegressor
-#from sklearn.ensemble import ExtraTreesRegressor, HistGradientBoostingRegressor, RandomForestRegressor
+from sklearn.ensemble import ExtraTreesRegressor, HistGradientBoostingRegressor, RandomForestRegressor
+
+from rf_shap.models.fast_forest import fast_forest
 
 
 def _optional_import(name: str):
@@ -23,6 +24,11 @@ def available_models() -> list[str]:
                 names.append("lightgbm_rf")
         except ImportError:
             pass
+    try:
+        __import__("data_structures.wrappers.histogram_random_forest_regressor")
+        names.append("fastforest")
+    except ImportError:
+        pass
     return names
 
 
@@ -35,6 +41,7 @@ def build_model(name: str = "extra_trees", params: dict[str, Any] | None = None,
       hist_gbm      : histogram boosting, very fast on large cubes
       lightgbm_rf   : LightGBM random-forest boosting mode
       rf            : sklearn RandomForest with multi-core defaults
+      fastforest    : ThrunGroup FastForest (MABSplit), only if that repo is on PYTHONPATH
     """
     params = dict(params or {})
     name = name.lower()
@@ -88,5 +95,8 @@ def build_model(name: str = "extra_trees", params: dict[str, Any] | None = None,
         params.setdefault("n_jobs", -1)
         params.pop("learning_rate", None)
         return lgb.LGBMRegressor(**params)
+
+    if name in {"fastforest", "fast_forest", "mabforest"}:
+        return fast_forest(**params)
 
     raise ValueError(f"Unknown model '{name}'. Available: {available_models()}")

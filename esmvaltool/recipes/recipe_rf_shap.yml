@@ -1,0 +1,105 @@
+# ESMValTool recipe for the rf_shap diagnostic.
+# ESMValCore preprocesses CMOR cubes (regrid to 1x1). The diagnostic then
+# fits tree models, computes SHAP, and writes cubes back to work_dir.
+#
+# Install the wrapper first (from the rf_shap repository root):
+#   bash esmvaltool/install_links.sh
+# then, without CMIP files:
+#   esmvaltool run recipe_rf_shap_demo.yml
+# or with a CMOR CMIP6 archive (filenames must include the grid, e.g. _gn_):
+#   esmvaltool run recipe_rf_shap.yml
+#
+# Flat folders that omit _gn_ can be linked first:
+#   python esmvaltool/prepare_cmor_names.py --src /data/ACCESS-CM2 --dst /data/cmip6_esmval
+# Point config-user.yml rootpath.CMIP6 at that destination and set drs.CMIP6: default.
+#
+# GPP case (CMOR Lmon gpp): recipe_rf_shap_gpp.yml
+#
+# Replace the dataset block with any CMOR-compliant CMIP6 / observational
+# datasets available in your config-user.yml rootpath.
+---
+documentation:
+  title: Random-forest and SHAP diagnosis of collocated model predictors versus a target field
+  description: |
+    Learn Y = f(X) from collocated (time, lat, lon) cubes using ExtraTrees,
+    score the mapping, and restore predictions and SHAP values as NetCDF.
+    Default example: map near-surface humidity and pressure onto near-surface
+    air temperature for one CMIP6 historical run. Change `target` and
+    `predictors` in the script section to use an observational Y.
+  authors:
+    - andela_bouwe
+  maintainer:
+    - schlund_manuel
+  references:
+    - acknow_project
+  projects:
+    - esmval
+
+datasets:
+  - dataset: ACCESS-CM2
+    project: CMIP6
+    exp: historical
+    ensemble: r1i1p1f1
+    grid: gn
+    institute: CSIRO-ARCCSS
+
+preprocessors:
+  rf_shap_cube:
+    regrid:
+      target_grid: 1x1
+      scheme: linear
+
+diagnostics:
+  rf_shap:
+    description: Tree-model mapping of collocated CMIP predictors onto a target
+    themes:
+      - phys
+    realms:
+      - atmos
+    variables:
+      tas:
+        mip: Amon
+        preprocessor: rf_shap_cube
+        timerange: "1980/2014"
+      huss:
+        mip: Amon
+        preprocessor: rf_shap_cube
+        timerange: "1980/2014"
+      hurs:
+        mip: Amon
+        preprocessor: rf_shap_cube
+        timerange: "1980/2014"
+      ps:
+        mip: Amon
+        preprocessor: rf_shap_cube
+        timerange: "1980/2014"
+    scripts:
+      rf_shap:
+        script: rf_shap/diagnostic.py
+        target: tas
+        predictors:
+          - huss
+          - hurs
+          - ps
+        caption: ExtraTrees mapping of humidity and pressure onto tas, with SHAP cubes.
+        rf_shap:
+          seed: 42
+          x_transform:
+            mode: raw
+          split:
+            method: time
+            test_size: 0.2
+          sampling:
+            method: random
+            n_samples: 8000
+          model:
+            name: extra_trees
+            params:
+              n_estimators: 120
+              max_depth: 12
+              n_jobs: -1
+          explain:
+            shap:
+              enabled: true
+              method: auto
+              max_samples: 1500

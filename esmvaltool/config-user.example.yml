@@ -1,0 +1,27 @@
+# Copy to ~/.config/esmvaltool/config-user.yml and edit the rootpath
+# entries. The demo recipe does not need climate data.
+#
+#   mkdir -p ~/.config/esmvaltool
+#   cp esmvaltool/config-user.example.yml ~/.config/esmvaltool/config-user.yml
+---
+output_dir: ~/esmvaltool_output
+auxiliary_data_dir: ~/auxiliary_data
+log_level: info
+output_file_type: png
+remove_preproc_dir: false
+max_parallel_tasks: 1
+
+rootpath:
+  # Placeholders only. After copying this file, point these at real trees.
+  # This machine's GPP case uses:
+  #   CMIP6: ~/Documents/esm_case_data/cmip6_esmval
+  #   OBS6:  ~/Documents/esm_case_data/obs6
+  CMIP6: ~/esmvaltool_data/cmip6
+  # Output of prepare_obs6_gpp.py (Tier3/ERA5, Tier3/FLUXCOM)
+  OBS6: ~/esmvaltool_data/obs6
+  default: ~/esmvaltool_data
+
+drs:
+  # Use ESGF if your archive follows the ESGF directory tree.
+  CMIP6: default
+  OBS6: default

@@ -19,3 +19,7 @@ outputs/
 .DS_Store
 .idea/
 .vscode/
+.cursor/
+Untitled.ipynb
+esmvaltool/config-user-local.yml
+esmvaltool/local_access.yaml

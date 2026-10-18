@@ -66,9 +66,33 @@ pip install -e ".[all]"
 | *(core)* | numpy, pandas, xarray, netCDF4, scikit-learn, scipy, pyyaml, matplotlib | I/O, preprocess, RF / ExtraTrees / HistGBM, metrics, plots |
 | `models` | xgboost, lightgbm | `xgboost`, `lightgbm`, `lightgbm_rf` |
 | `explain` | shap | TreeSHAP, KernelSHAP, permutation SHAP, sampling SHAP |
-| `fastshap` | fasttreeshap | FastTreeSHAP v1 / v2 |
+| `fastshap` | fasttreeshap | `fast_tree_shap`: fast random-forest SHAP (v1 / v2) |
 | `dev` | pytest | unit tests |
 | `all` | all of the above | full pipeline |
+
+### ESMValTool
+
+**Start here:** [`START.md`](START.md) (install overlay, smoke test, point `rootpath`, copy a recipe for any CMIP model vs any reference). This overlay is not yet inside the official ESMValGroup package.
+
+Testers who already have **ESMValTool 2.15**:
+
+```bash
+conda activate esmvaltool
+git clone https://github.com/feinihuang9554-max/RF_SHAP_ESMValTool.git
+cd RF_SHAP_ESMValTool
+bash esmvaltool/install_links.sh
+esmvaltool run esmvaltool/recipes/recipe_rf_shap_demo.yml
+```
+
+Climate recipes need a CMOR archive and `~/.config/esmvaltool/config-user.yml`. Details: `START.md` and `esmvaltool/README.md`.
+
+```python
+from esmvaltool.rf_shap import DiagnosisPipeline, compare_explanations
+from esmvaltool.diag_scripts.rf_shap.models import build_model
+from esmvaltool.rf_shap.cube import align_xy
+```
+
+Details: `esmvaltool/README.md`.
 
 Entry point after install: `rf-shap -c configs/default.yaml`.
 
@@ -196,7 +220,11 @@ Helpers:
 
 Empty time intersection raises an error. Flattening afterwards drops any cell that is non-finite in **any** X feature or in Y.
 
-### 5.4 Synthetic data (`make_synthetic_cubes`)
+### 5.4 Regrid to 1° (`regrid_to_1deg`)
+
+`regrid_to_1deg(data, grid="era5")` remaps a regular latitude/longitude cube onto one global 1° grid with an area-weighted mean. `grid="era5"` uses latitude 90…−90 and longitude 0…359, the same centres as the monthly ERA5 files. The input object is not changed. `regrid_file_to_1deg(source, destination)` writes that result to a new NetCDF file and refuses to replace `source`.
+
+### 5.5 Synthetic data (`make_synthetic_cubes`)
 
 `rf_shap.synthetic.make_synthetic_cubes(n_time=24, n_lat=8, n_lon=10, seed=0)` builds:
 
@@ -381,22 +409,28 @@ Tails of Y using `quantile` (default `0.9`): values ≤ \((1-q)\) quantile or �
 
 Module: `rf_shap.models.sampling`. Config: `sampling`. Applied **after the split, on TRAIN only**. `n_samples: null` keeps every training row.
 
-These cover i.i.d. draws plus **feature-space coverage** designs used in hydrological ML (FSCS-style clustering, conditioned Latin hypercube, Kennard–Stone), in the spirit of Journal of Hydrology / WRR sampling studies.
+Every design below selects rows that already exist in the training pool. `sample_train(X, y, method, n_samples, ...)` returns integer indices. `return_weights=True` also returns inverse-probability weights for `area` and `extreme`; other designs return `None`. Those weights are not passed into `model.fit` unless you do that yourself.
 
-`sample_train(X, y, method, n_samples, n_bins, seed, lat, lon)` returns integer indices.
+| `method` | Aliases | Function | What it keeps | Main limit | Reference |
+| --- | --- | --- | --- | --- | --- |
+| `random` | | `random_sample` | Uniform draw | Common states dominate | |
+| `area` | `area_weighted`, `pps` | `area_weighted_sample` | States in proportion to cell area and an optional per-row time weight. Equal-angle area is \(\cos(\mathrm{lat})\). | Rare environments and thresholds are under-sampled | Hansen & Hurwitz (1943); Cochran (1977) |
+| `stratified` | | `stratified_sample` | Y quantile bins, drawn in proportion to bin size | Only stratifies the target | Cochran (1977) |
+| `process` | `process_stratified`, `env_stratified` | `process_stratified_sample` | Season, covariate bins, or labels you supply (`strata`, `stratum_columns`). `balance: equal` or `proportional`. Datetime `time` with no columns uses DJF/MAM/JJA/SON. | Bins need a scientific reason; too many dimensions leave empty strata, which are skipped | Cochran (1977); Metzger et al. (2005); de Gruijter et al. (2006) |
+| `clhs` | `lhs` | `clhs_sample` | Marginal strata of each covariate, the correlation matrix, and class proportions if `categorical` is set. Swap annealing. | Cost grows with iterations; marginal and correlation match is not the full joint distribution | Minasny & McBratney (2006), doi:10.1016/j.cageo.2005.12.009 |
+| `fscs` | `cluster`, `coverage` | `fs_coverage_sample` | One existing row nearest each k-means centre in standardized X. \(k = n\_samples\). | Centre only; misses cluster edges and extremes | Brus et al. (2007); Brus (2019), doi:10.1016/j.geoderma.2018.07.036 |
+| `cluster_medoid` | `medoid` | `cluster_sample(..., draw="medoid")` | The medoid of each cluster (Kaufman & Rousseeuw). Clusters larger than 800 use the nearest-to-centre row. | Same edge/extreme gap as taking only a centre | Kaufman & Rousseeuw (1990) |
+| `cluster_within` | | `cluster_sample(..., draw="within")` | Real rows drawn inside each cluster. `n_clusters` sets the number of clusters. | Depends on scaling, features, and cluster count | Brus (2019) for the partition; draws are stratified across clusters |
+| `maximin` | `farthest`, `farthest_point` | `maximin_sample` | Sequential farthest point, starting from the farthest pair when the pool has at most 2500 rows | Favours outliers; does not preserve frequency | Kennard & Stone (1969); Johnson, Moore & Ylvisaker (1990) |
+| `kennard_stone` | `ks` | `kennard_stone` | Same farthest-point rule, but the first point is random | Same as maximin | Kennard & Stone (1969) |
+| `extreme` | `threshold`, `tail` | `extreme_sample` | A fraction `extreme_fraction` from the tails (`extreme_quantile`, `extreme_side`) or from `threshold` / `threshold_band`, the rest from the complement | Changes the training distribution. Use the returned weights, or `sample_weight`, to recover the population | Coles (2001) |
+| `active` | `active_learning`, `pool` | `active_learning_sample` | Batches that maximise extra-trees committee disagreement and are far from rows already chosen. Refit each round (`active_rounds`). | Repeated fits; high uncertainty is not automatically a useful new state | Lewis & Gale (1994); Seung et al. (1992); Abe & Mamitsuka (1998); Settles (2009) |
+| `aclhs` | | `aclhs_sample` | cLHS on X, plus a classical variogram of y along `time` and/or lat/lon (`dependence: auto`) | Keeps dependence for this design; it does not replace an independent validation split. Search swaps real rows; it is not the R package's differential-evolution solver | Le & Vargas (2024), doi:10.1016/j.cageo.2024.105539, on top of Minasny & McBratney (2006) |
+| `spatial` | | `spatial_sample` | FSCS on `(lat, lon)` | Geographic spread only | Brus (2019) |
+| `systematic` | | `systematic_sample` | Evenly spaced indices, random start | Ignores covariates | |
+| `none` / `all` | | | No downsampling | | |
 
-| `method` | Aliases | Function | Behaviour |
-| --- | --- | --- | --- |
-| `random` | | `random_sample` | Uniform without replacement. |
-| `stratified` | | `stratified_sample` | Bin Y into `n_bins` quantile bins; draw from each bin in proportion so rare Y values are not missed. |
-| `fscs` | `cluster`, `coverage` | `fs_coverage_sample` / `cluster_sample` | Standardize X, MiniBatch K-means with \(k = n\_samples\), keep the point closest to each centroid. Covers predictor space instead of oversampling common climates. |
-| `clhs` | `lhs` | `clhs_sample` | Simplified **conditioned Latin hypercube**: each X column split into `n_samples` strata; swap samples so each stratum is represented (~2000 iterations). |
-| `kennard_stone` | `ks` | `kennard_stone` | Start from a random point plus its farthest neighbour; repeatedly add the point with largest minimum distance to the selected set (space-filling in X). |
-| `spatial` | | `spatial_sample` | Same clustering as FSCS but on `(lat, lon)` so the subset is geographically spread. |
-| `systematic` | | `systematic_sample` | Evenly spaced indices with a random start. |
-| `none` / `all` | | | No downsampling. |
-
-Note: FSCS cluster count equals `n_samples`. Config key `n_clusters` is currently unused.
+`objective_weights` is `(O1, O2 or correlation, O3 or variogram)`. For acLHS each term is divided by its value on the initial sample, so `(1, 1, 1)` balances them. That is not the unnormalised `(10, 1000, 0.001)` example in the `aclhs` R package.
 
 ---
 
@@ -414,10 +448,13 @@ Module: `rf_shap.models.registry`. Config: `model.name`, `model.params`.
 | `xgboost` | | `XGBRegressor` | Requires `xgboost`. `tree_method=hist`, 400 trees, `max_depth=8`. |
 | `lightgbm` | | `LGBMRegressor` | Requires `lightgbm`. 400 trees. Often the fastest TreeSHAP among boosters. |
 | `lightgbm_rf` | | LightGBM `boosting_type=rf` | **RF mode**: `bagging_freq=1`, `bagging_fraction=0.8`, `feature_fraction=0.8`. Fast RF-like ensemble. |
+| `fastforest` | `fast_forest`, `mabforest` | `fast_forest` → ThrunGroup `HistogramRandomForestRegressor` with solver `MAB` | **Optional fast training.** [FastForest](https://github.com/ThrunGroup/FastForest) (Tiwari et al., NeurIPS 2022) bins features and picks splits with MABSplit. Defaults: 100 trees, `max_depth=16`, `num_bins=11`. Not a scikit-learn tree, so TreeSHAP / `fast_tree_shap` stay on `rf` and the other backends; `method: auto` uses a model-agnostic SHAP explainer for this model. |
 
-Any extra key in `model.params` is passed through to the backend (e.g. `n_estimators: 80` in the demo).
+Any extra key in `model.params` is passed through to the backend (e.g. `n_estimators: 80` in the demo). `fastforest` ignores sklearn-only keys such as `n_jobs` and `max_samples`. It stays unavailable until the FastForest repository root is on `PYTHONPATH`. Do not install that repository's `requirements.txt` into the ESMValTool environment.
 
 Python stand-ins for SoftwareX 2026 **fru** (Rust RF in R): ExtraTrees, LightGBM-RF, HistGBM. `fru` has no stable Python API here.
+
+Explaining a fitted forest is a separate cost from fitting it. `fast_tree_shap` is the fast option for that step: random forest (or ExtraTrees / boosting trees) plus [LinkedIn FastTreeSHAP](https://github.com/linkedin/fasttreeshap) v1 or v2, instead of single-core `shap.TreeExplainer`. See §14.3.
 
 ---
 
@@ -463,17 +500,24 @@ Shuffle one feature at a time on the **test** set, `explain.permutation_n_repeat
 
 Config: `explain.permutation_importance`. File: `permutation_importance.csv`.
 
-### 14.3 SHAP — `compute_shap`, `shap_to_cube`
+### 14.3 SHAP — `compute_shap`, `fast_tree_shap`, `shap_to_cube`
 
 Local attributions: for each explained sample, \(\sum \mathrm{SHAP} + \mathbb{E}[f] \approx \hat{y}\).
 
-Returns `ShapResult(values, expected_value, method, index, feature_names, sample_positions)` with `.to_frame()`.
+Returns `ShapResult(values, expected_value, method, index, feature_names, sample_positions, algorithm)` with `.to_frame()`.
+
+**Fast option for random forest + SHAP:** `fast_tree_shap(model, x, algorithm="v2", n_jobs=-1)`. This calls [LinkedIn FastTreeSHAP](https://github.com/linkedin/fasttreeshap) (Yang, NeurIPS 2021 workshop). scikit-learn random forests have no built-in TreeSHAP, and `shap.TreeExplainer` explains them on one core. FastTreeSHAP v1 and v2 are parallel. On one core the paper reports about 1.5× (v1, same memory) and 2.5× (v2, higher memory). On an 8-core machine, sklearn random forests in that paper were about 7–15× faster than single-core TreeSHAP. `compute_shap(..., method="fasttreeshap")` and the default `method: auto` use this function for tree models, then `shap_to_cube` writes the values back onto `(time, lat, lon)`.
+
+The PyPI wheel targets NumPy 1. Under NumPy 2, build it from source in the same environment: `pip install --no-deps --no-build-isolation --no-binary :all: fasttreeshap`. On macOS the build also needs `brew install libomp`.
+
+The default `feature_perturbation` is `tree_path_dependent`: exact for trees, and it does not take a background set, so a large training cube does not slow the explanation. Set `feature_perturbation: interventional` only when a small background (`background_size`) is required.
 
 | `explain.shap.method` | Algorithm | When to use |
 | --- | --- | --- |
-| `auto` | FastTreeSHAP if installed, else path-dependent TreeSHAP | Default. |
-| `fasttreeshap` | LinkedIn FastTreeSHAP (`algorithm`: `v0`, `v1`, `v2`, `auto`) | Fastest tree SHAP. v1 ≈ 1.5× TreeSHAP, same RAM. v2 ≈ 2.5×, precomputes tree terms, more RAM. |
-| `treeshap` | `shap.TreeExplainer` path-dependent (no background) | Exact tree SHAP; usually the fastest **exact** option without FastTreeSHAP. |
+| `auto` | `fast_tree_shap` if `fasttreeshap` is installed, else path-dependent TreeSHAP | Default. |
+| `fasttreeshap` | `fast_tree_shap` (`algorithm`: `v0`, `v1`, `v2`, `auto`) | Fast RF + SHAP. Requires `pip install fasttreeshap`. |
+| `linear_treeshap` | [Linear TreeSHAP](https://github.com/yupbank/linear_tree_shap), exact O(LD) per sklearn tree. `algorithm: v2` uses the numerically stable Chebyshev form. | Another exact option for sklearn forests. A forest value is the mean of its trees. Not used by `auto`. |
+| `treeshap` | `shap.TreeExplainer` path-dependent (no background) | Exact tree SHAP without the FastTreeSHAP package. |
 | `kernel` | KernelSHAP | Any model; slow. Keep `background_size` and `max_samples` small. |
 | `permutation` | `shap.PermutationExplainer` | Model-agnostic permutation SHAP. |
 | `sampling` | `shap.SamplingExplainer` | Model-agnostic sampling approximation. |
@@ -485,8 +529,9 @@ Speed / quality knobs:
 | `enabled` | Skip SHAP entirely if `false`. |
 | `max_samples` | Explain only this many test rows (random). Other cells are NaN in the SHAP cube. `null` = all test samples. |
 | `background_size` | K-means (fallback: random) background size for interventional / model-agnostic SHAP. |
-| `n_jobs` | Passed to FastTreeSHAP. |
-| `algorithm` | FastTreeSHAP only. |
+| `n_jobs` | Threads for `fast_tree_shap`. `-1` uses every core. |
+| `algorithm` | `v1`, `v2` (default), `auto`, or `v0`. |
+| `feature_perturbation` | `tree_path_dependent` (default, fast) or `interventional`. |
 
 Other practical speed-ups: shallower `max_depth`, ExtraTrees or LightGBM instead of a deep sklearn RF, GPU TreeSHAP if your `shap` build supports it.
 
@@ -515,6 +560,19 @@ For each feature:
 Result: `result.artifacts["ice_pdp"][feature]` with `grid`, `pdp`, `ice`, `ice_index`.
 
 Config: `explain.ice_pdp`, `explain.ice_n_samples`, `explain.pdp_grid`.
+
+### 14.6 Compare two explanations — `compare_explanations`
+
+`compare_explanations(...)` measures how far one explanation is from a reference. Pass the pieces you have. It returns a dict of tables:
+
+| Key | What is compared |
+| --- | --- |
+| `ale_distance` | 1D ALE curves (`ale_1d` output). Distance is RMSE after interpolating both curves onto their overlapping x range. |
+| `dependence_distance` | Dependence SHAP. Each feature is binned, the bin-mean SHAP is the curve, then the same RMSE is used. |
+| `interaction_distance` | Interactive SHAP. For each ordered pair of distinct features, the curve is mean interaction SHAP against the first feature. Obtain the values with `interaction_shap(model, x)`. |
+| `slope_difference` | Slope of the dependence-SHAP curve, `slope_other - slope_ref`. The slope is SHAP per unit of x, a sensitivity of that explanation. |
+
+The same pieces are available on their own: `curve_distance`, `ale_curve_distance`, `dependence_curve_distance`, `interaction_curve_distance`, `dependence_slopes`, `dependence_slope_difference`.
 
 ---
 
@@ -603,9 +661,15 @@ Canonical file: [`configs/default.yaml`](configs/default.yaml).
 | `split.time_window.expanding` | bool | Expanding vs rolling train |
 | `split.extreme.quantile` | float | Tail definition |
 | `split.extreme.hold_extremes_as` | `test` \| `train` | Where tails go |
-| `sampling.method` | `random` \| `stratified` \| `fscs` \| `clhs` \| `kennard_stone` \| `cluster` \| `spatial` \| `systematic` | Downsample train |
+| `sampling.method` | see §11 | Downsample train. Default remains `random`. |
 | `sampling.n_samples` | int or null | Subset size (`null` = all) |
-| `sampling.n_bins` | int | Stratified Y bins |
+| `sampling.n_bins` | int | Stratified Y bins, or process-stratum bins |
+| `sampling.n_clusters` | int | Clusters for `cluster_within` |
+| `sampling.balance` | `equal` \| `proportional` | Allocation inside process strata |
+| `sampling.extreme_fraction` | float | Share of an extreme design taken from the tail or threshold pool |
+| `sampling.extreme_quantile` | float | Tail probability for `extreme` |
+| `sampling.n_iter` | int | Annealing steps for `clhs` and `aclhs` |
+| `sampling.dependence` | `auto` \| `time` \| `space` \| `both` | Coordinate used by the acLHS variogram |
 | `model.name` | see §12 | Estimator |
 | `model.params` | dict | Passed to the backend |
 | `predict.restore_cube` | bool | Write `prediction.nc` |
@@ -613,8 +677,9 @@ Canonical file: [`configs/default.yaml`](configs/default.yaml).
 | `explain.permutation_importance` | bool | Permutation importance |
 | `explain.permutation_n_repeats` | int | Permutation repeats |
 | `explain.shap.enabled` | bool | Compute SHAP |
-| `explain.shap.method` | `auto` \| `treeshap` \| `fasttreeshap` \| `kernel` \| `permutation` \| `sampling` | SHAP algorithm |
-| `explain.shap.algorithm` | `v0` \| `v1` \| `v2` \| `auto` | FastTreeSHAP variant |
+| `explain.shap.method` | `auto` \| `treeshap` \| `fasttreeshap` \| `linear_treeshap` \| `kernel` \| `permutation` \| `sampling` | SHAP algorithm. `fasttreeshap` calls `fast_tree_shap`. `linear_treeshap` calls `linear_tree_shap`. |
+| `explain.shap.algorithm` | `v0` \| `v1` \| `v2` \| `auto` | FastTreeSHAP variant. `v2` is the fast default for random forests. |
+| `explain.shap.feature_perturbation` | `tree_path_dependent` \| `interventional` | Path-dependent is the fast exact tree option. |
 | `explain.shap.max_samples` | int or null | SHAP subsample |
 | `explain.shap.background_size` | int | Background size |
 | `explain.shap.n_jobs` | int | FastTreeSHAP threads |
@@ -640,7 +705,7 @@ Canonical file: [`configs/default.yaml`](configs/default.yaml).
 
 ### Cube I/O and features
 
-`load_cube`, `load_netcdf`, `load_npy`, `load_table`, `dataset_from_arrays`, `table_to_dataset`, `align_xy`, `preprocess_dataset`, `preprocess_dataarray`, `detrend_along_time`, `deseasonalize`, `anomaly`, `standardize`, `build_x_features`, `add_lags`, `eof_compress`, `pca_transform_table`, `cube_to_table`, `table_to_cube`, `values_to_cubes`, `SampleTable`.
+`load_cube`, `load_netcdf`, `load_npy`, `load_table`, `dataset_from_arrays`, `table_to_dataset`, `align_xy`, `one_degree_coordinates`, `regrid_to_1deg`, `regrid_file_to_1deg`, `preprocess_dataset`, `preprocess_dataarray`, `detrend_along_time`, `deseasonalize`, `anomaly`, `standardize`, `build_x_features`, `add_lags`, `eof_compress`, `pca_transform_table`, `cube_to_table`, `table_to_cube`, `values_to_cubes`, `SampleTable`.
 
 ### Feature selection
 
@@ -648,11 +713,11 @@ Canonical file: [`configs/default.yaml`](configs/default.yaml).
 
 ### Models / split / sampling
 
-`build_model`, `available_models`, `split_table`, `time_split`, `space_split`, `time_window_splits`, `random_split`, `extreme_split`, `SplitResult`, `sample_train`, `random_sample`, `stratified_sample`, `cluster_sample`, `fs_coverage_sample`, `clhs_sample`, `kennard_stone`, `spatial_sample`, `systematic_sample`.
+`build_model`, `available_models`, `fast_forest`, `split_table`, `time_split`, `space_split`, `time_window_splits`, `random_split`, `extreme_split`, `SplitResult`, `sample_train`, `random_sample`, `stratified_sample`, `cluster_sample`, `fs_coverage_sample`, `clhs_sample`, `kennard_stone`, `maximin_sample`, `area_weighted_sample`, `process_stratified_sample`, `extreme_sample`, `active_learning_sample`, `aclhs_sample`, `pps_weights`, `spatial_sample`, `systematic_sample`.
 
 ### Predict / explain / plot / util
 
-`regression_metrics`, `reconstruct_prediction`, `model_importance`, `permutation_scores`, `compute_shap`, `shap_to_cube`, `ShapResult`, `ale_1d`, `ice_pdp`, all `plot_*` in §15, `make_synthetic_cubes`, `load_config`, `PipelineConfig`.
+`regression_metrics`, `reconstruct_prediction`, `model_importance`, `permutation_scores`, `compute_shap`, `fast_tree_shap`, `shap_to_cube`, `ShapResult`, `ale_1d`, `ice_pdp`, `curve_distance`, `binned_dependence`, `ale_curve_distance`, `dependence_curve_distance`, `dependence_slopes`, `dependence_slope_difference`, `interaction_curve_distance`, `interaction_shap`, `compare_explanations`, all `plot_*` in §15, `make_synthetic_cubes`, `load_config`, `PipelineConfig`.
 
 ---
 
@@ -672,6 +737,7 @@ PYTHONPATH=src python -m rf_shap.cli -c configs/default.yaml
 | `tests/test_core.py` | Cube round-trip, metrics, split, collinearity, sampling. |
 | `tests/test_pipeline.py` | Smoke test of `DiagnosisPipeline` without SHAP. |
 | `tests/test_shap.py` | SHAP restore-to-cube. |
+| `esmvaltool/` | ESMValTool recipe, diagnostic, install symlink, local runner. |
 
 ```bash
 PYTHONPATH=src pytest -q
@@ -696,6 +762,7 @@ src/rf_shap/
   predict/             # metrics, cube reconstruction
   explain/             # importance, SHAP, ALE, ICE/PDP
 configs/default.yaml
+esmvaltool/           # recipe_rf_shap.yml + diag_scripts/rf_shap
 examples/
 tests/
 ```

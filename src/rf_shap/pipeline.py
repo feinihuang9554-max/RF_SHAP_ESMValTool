@@ -111,6 +111,7 @@ class DiagnosisPipeline:
         train = select_features(split.train, self.config.raw.get("feature_selection"), seed=seed)
         test = split.test.select_columns(train.feature_names)
         samp = self.config.raw.get("sampling", {})
+        names = list(train.index.names)
         idx = sample_train(
             train.X,
             train.y,
@@ -118,8 +119,28 @@ class DiagnosisPipeline:
             n_samples=samp.get("n_samples"),
             n_bins=int(samp.get("n_bins", 10)),
             seed=seed,
-            lat=np.asarray(train.index.get_level_values("lat")),
-            lon=np.asarray(train.index.get_level_values("lon")),
+            lat=np.asarray(train.index.get_level_values("lat")) if "lat" in names else None,
+            lon=np.asarray(train.index.get_level_values("lon")) if "lon" in names else None,
+            time=np.asarray(train.index.get_level_values("time")) if "time" in names else None,
+            area_weights=samp.get("area_weights"),
+            time_weights=samp.get("time_weights"),
+            strata=samp.get("strata"),
+            stratum_columns=samp.get("stratum_columns"),
+            categorical_columns=samp.get("categorical_columns"),
+            categorical=samp.get("categorical"),
+            balance=samp.get("balance", "equal"),
+            n_clusters=samp.get("n_clusters"),
+            extreme_fraction=float(samp.get("extreme_fraction", 0.5)),
+            extreme_quantile=float(samp.get("extreme_quantile", 0.9)),
+            extreme_side=samp.get("extreme_side", "both"),
+            threshold=samp.get("threshold"),
+            threshold_band=samp.get("threshold_band"),
+            threshold_column=samp.get("threshold_column"),
+            n_iter=int(samp.get("n_iter", 2000)),
+            active_rounds=int(samp.get("active_rounds", 3)),
+            active_batch=samp.get("active_batch"),
+            dependence=samp.get("dependence", "auto"),
+            objective_weights=samp.get("objective_weights"),
         )
         train_s = train.take(idx)
         model_cfg = self.config.raw.get("model", {})
@@ -173,6 +194,7 @@ class DiagnosisPipeline:
                 n_jobs=int(shap_cfg.get("n_jobs", -1)),
                 seed=seed,
                 background=train_s.X,
+                feature_perturbation=shap_cfg.get("feature_perturbation", "tree_path_dependent"),
             )
             artifacts["shap_result"] = shap_res
             artifacts["shap_table"] = shap_res.to_frame()

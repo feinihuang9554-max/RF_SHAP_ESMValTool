@@ -3,11 +3,34 @@ from __future__ import annotations
 from typing import Literal
 
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 
 RegridMode = Literal["none", "nearest", "linear"]
 JoinTime = Literal["inner", "nearest"]
+
+
+def stamp_year_month(data: xr.Dataset | xr.DataArray) -> xr.Dataset | xr.DataArray:
+    """Replace the time axis with the first day of each calendar month.
+
+    Yearly observational files often use mid-month dates or timestamps with a
+    few stray nanoseconds. Mapping them onto ``YYYY-MM-01`` lets cubes join
+    without interpolation. Duplicate months are averaged.
+    """
+    if "time" not in data.coords and "time" not in data.dims:
+        raise ValueError("Need a time coordinate to stamp year-month")
+    stamped = pd.to_datetime(data.time.values).to_period("M").to_timestamp()
+    out = data.assign_coords(time=("time", np.asarray(stamped, dtype="datetime64[ns]")))
+    if pd.Index(out.time.values).duplicated().any():
+        out = out.groupby("time").mean(keep_attrs=True)
+    return out.sortby("time")
+
+
+def align_month_cubes(*cubes: xr.Dataset, join: str = "inner") -> tuple[xr.Dataset, ...]:
+    """Inner (or outer) join of already-gridded cubes on year-month time."""
+    stamped = [stamp_year_month(cube) for cube in cubes]
+    return tuple(xr.align(*stamped, join=join, copy=False))
 
 
 def _interp_to(source: xr.Dataset, target: xr.Dataset, method: RegridMode) -> xr.Dataset:

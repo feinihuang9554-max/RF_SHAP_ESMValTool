@@ -74,13 +74,21 @@ split:
     hold_extremes_as: test  # test | train
 
 sampling:
-  method: random          # random | stratified | fscs | clhs | kennard_stone | cluster | spatial | systematic
+  # random | stratified | fscs | clhs | kennard_stone | maximin | cluster | cluster_medoid | cluster_within
+  # | spatial | systematic | area | process | extreme | active | aclhs
+  method: random
   n_samples: null         # null 表示用全部训练样本
-  n_bins: 10
-  n_clusters: 50
+  n_bins: 10              # stratified 的 Y 分箱；process 的协变量分箱
+  n_clusters: 50          # 只用于 cluster_within
+  balance: equal          # process：equal | proportional
+  extreme_fraction: 0.5   # extreme：从尾部或阈值附近抽取的比例
+  extreme_quantile: 0.9
+  n_iter: 2000            # clhs / aclhs 的退火步数
+  active_rounds: 3
+  dependence: auto        # aclhs：auto | time | space | both
 
 model:
-  name: extra_trees       # rf | extra_trees | hist_gbm | xgboost | lightgbm | lightgbm_rf
+  name: extra_trees       # rf | extra_trees | hist_gbm | xgboost | lightgbm | lightgbm_rf | fastforest
   params:
     n_estimators: 200
     max_depth: 12
@@ -96,8 +104,9 @@ explain:
   permutation_n_repeats: 5
   shap:
     enabled: true
-    method: auto          # auto | treeshap | fasttreeshap | kernel | permutation | sampling
-    algorithm: v2         # FastTreeSHAP: v1 | v2 | auto
+    method: auto          # auto | treeshap | fasttreeshap | linear_treeshap | kernel | permutation | sampling
+    algorithm: v2         # fast_tree_shap: v1 | v2 | auto | v0
+    feature_perturbation: tree_path_dependent  # tree_path_dependent | interventional
     max_samples: 2000     # 加速：只解释子集，其余格点为 NaN
     background_size: 100
     n_jobs: -1

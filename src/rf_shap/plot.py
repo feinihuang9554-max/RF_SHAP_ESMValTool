@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Sequence
 
 import matplotlib.pyplot as plt
@@ -19,21 +20,60 @@ def _style():
     )
 
 
-def plot_cube_maps(ds: xr.Dataset, time_index: int = 0, cmap: str = "RdYlBu_r", title: str | None = None):
-    """One spatial map per variable at a single time."""
+def _color_limits(values: np.ndarray, *, diverging: bool) -> dict:
+    finite = np.asarray(values, dtype=np.float64)
+    finite = finite[np.isfinite(finite)]
+    if finite.size == 0:
+        return {}
+    if diverging:
+        vmax = float(np.nanpercentile(np.abs(finite), 98)) or 1.0
+        return {"vmin": -vmax, "vmax": vmax}
+    lo, hi = np.nanpercentile(finite, [2, 98])
+    if not np.isfinite(lo) or hi <= lo:
+        return {}
+    return {"vmin": float(lo), "vmax": float(hi)}
+
+
+def plot_cube_maps(
+    ds: xr.Dataset,
+    time_index: int = 0,
+    cmap: str = "RdYlBu_r",
+    title: str | None = None,
+    reduce: str = "none",
+):
+    """One spatial map per variable.
+
+    ``reduce='mean'`` averages over time (needed for SHAP cubes, which are
+    filled only on test samples). Colour limits use the 2–98 percentiles so
+    small CMOR units remain visible.
+    """
     _style()
     names = list(ds.data_vars)
     n = len(names)
     fig, axes = plt.subplots(1, n, figsize=(4.2 * n, 3.6), squeeze=False)
-    t = ds.time.values[time_index]
+    diverging = cmap.lower() in {"rdbu_r", "rdbu", "coolwarm", "seismic"}
+    stamp = ""
+    if "time" in ds.dims and reduce != "mean":
+        stamp = str(pd.to_datetime(ds.time.values[time_index]))
+    elif reduce == "mean":
+        stamp = "time mean"
     for ax, name in zip(axes[0], names):
-        da = ds[name].isel(time=time_index)
-        im = ax.pcolormesh(ds.lon, ds.lat, da, shading="auto", cmap=cmap)
+        da = ds[name]
+        if "time" in da.dims:
+            da = da.mean("time") if reduce == "mean" else da.isel(time=time_index)
+        im = ax.pcolormesh(
+            ds.lon,
+            ds.lat,
+            da,
+            shading="auto",
+            cmap=cmap,
+            **_color_limits(da.values, diverging=diverging),
+        )
         ax.set_xlabel("lon")
         ax.set_ylabel("lat")
         ax.set_title(name)
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-    fig.suptitle(title or f"spatial maps @ {pd.to_datetime(t)}")
+    fig.suptitle(title or f"spatial maps ({stamp})")
     fig.tight_layout()
     return fig
 
@@ -166,10 +206,11 @@ def plot_error_map(obs: xr.DataArray, pred: xr.DataArray, time_index: int | None
         (axes[1], pred_m, "predicted", "viridis"),
         (axes[2], err, "pred − obs", "RdBu_r"),
     ):
-        vmax = np.nanpercentile(np.abs(da.values), 98) if title.startswith("pred") and "obs" in title else None
-        kw = dict(shading="auto", cmap=cmap)
-        if vmax is not None:
-            kw.update(vmin=-vmax, vmax=vmax)
+        kw = dict(
+            shading="auto",
+            cmap=cmap,
+            **_color_limits(da.values, diverging="obs" in title and title.startswith("pred")),
+        )
         im = ax.pcolormesh(da.lon, da.lat, da, **kw)
         ax.set_title(title)
         ax.set_xlabel("lon")
@@ -212,8 +253,47 @@ def plot_shap_summary(shap_values: np.ndarray, x: np.ndarray, names: Sequence[st
     return fig
 
 
-def plot_shap_maps(shap_cube: xr.Dataset, time_index: int = 0, title: str = "SHAP restored to cube"):
-    return plot_cube_maps(shap_cube, time_index=min(time_index, shap_cube.sizes["time"] - 1), cmap="RdBu_r", title=title)
+def plot_shap_maps(
+    shap_cube: xr.Dataset,
+    time_index: int | None = None,
+    title: str = "SHAP restored to cube",
+):
+    """Map SHAP that has been written back onto ``(time, lat, lon)``.
+
+    Default is the time mean: a chronological split leaves early times empty.
+    """
+    if time_index is None:
+        return plot_cube_maps(shap_cube, reduce="mean", cmap="RdBu_r", title=title)
+    return plot_cube_maps(
+        shap_cube,
+        time_index=min(time_index, shap_cube.sizes["time"] - 1),
+        cmap="RdBu_r",
+        title=title,
+    )
+
+
+def plot_comparison_bars(
+    frame: pd.DataFrame,
+    value_col: str,
+    title: str,
+    xlabel: str | None = None,
+):
+    """Bar chart of a comparison table (distance or slope difference)."""
+    _style()
+    df = frame.copy()
+    if "feature" not in df.columns:
+        df = df.reset_index().rename(columns={"index": "feature"})
+    if "interacts_with" in df.columns:
+        df["feature"] = df["feature"].astype(str) + " × " + df["interacts_with"].astype(str)
+    df = df.dropna(subset=[value_col]).sort_values(value_col)
+    fig, ax = plt.subplots(figsize=(6.2, max(2.6, 0.4 * len(df) + 1)))
+    colors = ["tab:red" if v < 0 else "steelblue" for v in df[value_col]]
+    ax.barh(df["feature"].astype(str), df[value_col], color=colors)
+    ax.axvline(0, color="k", lw=0.7)
+    ax.set_xlabel(xlabel or value_col)
+    ax.set_title(title)
+    fig.tight_layout()
+    return fig
 
 
 def plot_ale(ale: dict, title: str = "Accumulated Local Effects"):
@@ -251,3 +331,299 @@ def plot_ice_pdp(ice_pdp: dict, title: str = "ICE (thin) + PDP (thick)"):
     fig.suptitle(title)
     fig.tight_layout()
     return fig
+
+
+def _subsample_rows(n: int, max_points: int, seed: int = 0) -> np.ndarray:
+    if n <= max_points:
+        return np.arange(n)
+    return np.random.default_rng(seed).choice(n, size=max_points, replace=False)
+
+
+def plot_shap_dependence(
+    x,
+    shap_values,
+    names: Sequence[str],
+    title: str = "SHAP dependence",
+    n_bins: int = 20,
+    max_points: int = 2500,
+):
+    """One panel per driver: x-axis is the variable, y-axis is its SHAP value."""
+    from rf_shap.explain.evaluate import binned_dependence
+
+    _style()
+    features = np.asarray(x, dtype=np.float64)
+    values = np.asarray(shap_values, dtype=np.float64)
+    names = list(names)
+    n = len(names)
+    fig, axes = plt.subplots(1, n, figsize=(3.6 * n, 3.5), squeeze=False)
+    keep = _subsample_rows(len(features), max_points)
+    for ax, j, name in zip(axes[0], range(n), names):
+        ax.scatter(features[keep, j], values[keep, j], s=6, alpha=0.25, c="0.45", linewidths=0)
+        curve = binned_dependence(features[:, j], values[:, j], n_bins=n_bins)
+        if len(curve):
+            ax.plot(curve["x"], curve["y"], color="tab:red", lw=2.0, label="binned mean")
+        ax.axhline(0, color="k", lw=0.6)
+        ax.set_xlabel(name)
+        ax.set_ylabel(f"SHAP of {name}")
+        ax.set_title(name)
+    axes[0, 0].legend(loc="best", fontsize=8)
+    fig.suptitle(title)
+    fig.tight_layout()
+    return fig
+
+
+def plot_shap_dependence_overlay(
+    x_obs,
+    shap_obs,
+    names_obs: Sequence[str],
+    x_cmip,
+    shap_cmip,
+    names_cmip: Sequence[str],
+    title: str = "SHAP dependence: observations vs CMIP",
+    obs_label: str = "observations",
+    cmip_label: str = "CMIP",
+    n_bins: int = 20,
+):
+    """Binned SHAP dependence curves for shared drivers."""
+    from rf_shap.explain.evaluate import binned_dependence
+
+    _style()
+    names = [name for name in names_obs if name in set(names_cmip)]
+    if not names:
+        raise ValueError("No shared features for SHAP dependence overlay")
+    obs_x = np.asarray(x_obs, dtype=np.float64)
+    obs_s = np.asarray(shap_obs, dtype=np.float64)
+    cmip_x = np.asarray(x_cmip, dtype=np.float64)
+    cmip_s = np.asarray(shap_cmip, dtype=np.float64)
+    obs_idx = {name: i for i, name in enumerate(names_obs)}
+    cmip_idx = {name: i for i, name in enumerate(names_cmip)}
+    fig, axes = plt.subplots(1, len(names), figsize=(3.6 * len(names), 3.5), squeeze=False)
+    for ax, name in zip(axes[0], names):
+        i, j = obs_idx[name], cmip_idx[name]
+        left = binned_dependence(obs_x[:, i], obs_s[:, i], n_bins=n_bins)
+        right = binned_dependence(cmip_x[:, j], cmip_s[:, j], n_bins=n_bins)
+        if len(left):
+            ax.plot(left["x"], left["y"], color="tab:blue", lw=2.2, label=obs_label)
+        if len(right):
+            ax.plot(right["x"], right["y"], color="tab:orange", lw=2.2, label=cmip_label)
+        ax.axhline(0, color="k", lw=0.6)
+        ax.set_xlabel(name)
+        ax.set_ylabel(f"SHAP of {name}")
+        ax.set_title(name)
+    axes[0, 0].legend(loc="best", fontsize=8)
+    fig.suptitle(title)
+    fig.tight_layout()
+    return fig
+
+
+def plot_ale_overlay(
+    ale_obs: dict,
+    ale_cmip: dict,
+    title: str = "ALE: observations vs CMIP",
+    obs_label: str = "observations",
+    cmip_label: str = "CMIP",
+):
+    _style()
+    names = [name for name in ale_obs if name in ale_cmip]
+    if not names:
+        raise ValueError("No shared features for ALE overlay")
+    fig, axes = plt.subplots(1, len(names), figsize=(3.8 * len(names), 3.4), squeeze=False)
+    for ax, name in zip(axes[0], names):
+        ax.plot(ale_obs[name]["x"], ale_obs[name]["ale"], color="tab:blue", lw=2.0, label=obs_label)
+        ax.plot(ale_cmip[name]["x"], ale_cmip[name]["ale"], color="tab:orange", lw=2.0, label=cmip_label)
+        ax.axhline(0, color="k", lw=0.6)
+        ax.set_xlabel(name)
+        ax.set_ylabel("ALE")
+        ax.set_title(name)
+    axes[0, 0].legend(loc="best", fontsize=8)
+    fig.suptitle(title)
+    fig.tight_layout()
+    return fig
+
+
+def plot_pdp_overlay(
+    ice_obs: dict,
+    ice_cmip: dict,
+    title: str = "PDP: observations vs CMIP",
+    obs_label: str = "observations",
+    cmip_label: str = "CMIP",
+):
+    _style()
+    names = [name for name in ice_obs if name in ice_cmip]
+    if not names:
+        raise ValueError("No shared features for PDP overlay")
+    fig, axes = plt.subplots(1, len(names), figsize=(3.8 * len(names), 3.4), squeeze=False)
+    for ax, name in zip(axes[0], names):
+        ax.plot(ice_obs[name]["grid"], ice_obs[name]["pdp"], color="tab:blue", lw=2.2, label=obs_label)
+        ax.plot(ice_cmip[name]["grid"], ice_cmip[name]["pdp"], color="tab:orange", lw=2.2, label=cmip_label)
+        ax.set_xlabel(name)
+        ax.set_ylabel("prediction")
+        ax.set_title(name)
+    axes[0, 0].legend(loc="best", fontsize=8)
+    fig.suptitle(title)
+    fig.tight_layout()
+    return fig
+
+
+def plot_importance_overlay(
+    frame_obs: pd.DataFrame,
+    frame_cmip: pd.DataFrame,
+    title: str = "Importance: observations vs CMIP",
+    obs_label: str = "observations",
+    cmip_label: str = "CMIP",
+    value_col: str = "importance",
+):
+    _style()
+    left = frame_obs.set_index("feature")[value_col]
+    right = frame_cmip.set_index("feature")[value_col]
+    names = [name for name in left.index if name in right.index]
+    y = np.arange(len(names))
+    fig, ax = plt.subplots(figsize=(6.5, max(2.6, 0.4 * len(names) + 1)))
+    ax.barh(y - 0.18, [left.loc[n] for n in names], height=0.35, color="tab:blue", label=obs_label)
+    ax.barh(y + 0.18, [right.loc[n] for n in names], height=0.35, color="tab:orange", label=cmip_label)
+    ax.set_yticks(y, names)
+    ax.set_xlabel(value_col)
+    ax.set_title(title)
+    ax.legend()
+    fig.tight_layout()
+    return fig
+
+
+def plot_metrics_compare(
+    metrics_obs: dict,
+    metrics_cmip: dict,
+    title: str = "Mapping skill: observations vs CMIP",
+    obs_label: str = "observations",
+    cmip_label: str = "CMIP",
+):
+    _style()
+    keys = [k for k in ("r2", "rmse", "ubrmse", "bias") if k in metrics_obs and k in metrics_cmip]
+    x = np.arange(len(keys))
+    fig, ax = plt.subplots(figsize=(6.2, 3.6))
+    ax.bar(x - 0.18, [metrics_obs[k] for k in keys], width=0.35, color="tab:blue", label=obs_label)
+    ax.bar(x + 0.18, [metrics_cmip[k] for k in keys], width=0.35, color="tab:orange", label=cmip_label)
+    ax.set_xticks(x, keys)
+    ax.set_title(title)
+    ax.legend()
+    fig.tight_layout()
+    return fig
+
+
+def plot_cube_difference(
+    obs_ds: xr.Dataset,
+    cmip_ds: xr.Dataset,
+    title: str = "CMIP − observations (time mean)",
+    cmap: str = "RdBu_r",
+):
+    """Time-mean difference maps for shared variables."""
+    _style()
+    names = [name for name in obs_ds.data_vars if name in cmip_ds.data_vars]
+    if not names:
+        raise ValueError("No shared variables for cube difference")
+    fig, axes = plt.subplots(1, len(names), figsize=(4.2 * len(names), 3.6), squeeze=False)
+    for ax, name in zip(axes[0], names):
+        left = obs_ds[name]
+        right = cmip_ds[name]
+        if "time" in left.dims:
+            left = left.mean("time")
+        if "time" in right.dims:
+            right = right.mean("time")
+        left, right = xr.align(left, right, join="inner")
+        diff = right - left
+        im = ax.pcolormesh(
+            diff.lon,
+            diff.lat,
+            diff,
+            shading="auto",
+            cmap=cmap,
+            **_color_limits(diff.values, diverging=True),
+        )
+        ax.set_title(name)
+        ax.set_xlabel("lon")
+        ax.set_ylabel("lat")
+        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    fig.suptitle(title)
+    fig.tight_layout()
+    return fig
+
+
+def write_three_column_html(
+    path: str | Path,
+    title: str,
+    obs_label: str,
+    cmip_label: str,
+    rows: Sequence[dict],
+    intro: str = "",
+) -> Path:
+    """Write a three-column gallery: observations | CMIP | comparison."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    root = path.parent
+
+    def _src(value) -> str:
+        if not value:
+            return ""
+        target = Path(value)
+        try:
+            return target.resolve().relative_to(root.resolve()).as_posix()
+        except ValueError:
+            return target.as_posix()
+
+    blocks = []
+    for row in rows:
+        cells = []
+        for key in ("obs", "cmip", "compare"):
+            src = _src(row.get(key))
+            if src:
+                cells.append(
+                    f'<div class="cell"><img src="{src}" alt="{row.get("title", "")}"></div>'
+                )
+            else:
+                cells.append('<div class="cell empty">—</div>')
+        caption = row.get("caption") or ""
+        blocks.append(
+            f'<section class="row-block">'
+            f'<h2>{row.get("title", "")}</h2>'
+            f'<div class="grid">{"".join(cells)}</div>'
+            f'<p class="caption">{caption}</p>'
+            f"</section>"
+        )
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{title}</title>
+  <style>
+    body {{ font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; color: #222;
+           margin: 0 auto; max-width: 1400px; padding: 1.5rem 1.2rem 4rem; background: #f4f6f8; }}
+    h1 {{ font-size: 1.6rem; margin: 0 0 0.4rem; }}
+    .intro {{ color: #555; margin-bottom: 1.2rem; }}
+    .headers {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; position: sticky;
+                top: 0; z-index: 2; }}
+    .headers div {{ background: #1f4e79; color: #fff; text-align: center; padding: 0.55rem;
+                    font-weight: 600; border-radius: 6px; }}
+    .row-block {{ background: #fff; border-radius: 8px; padding: 0.8rem 0.9rem 1rem;
+                  margin: 1rem 0; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }}
+    .row-block h2 {{ font-size: 1.05rem; margin: 0 0 0.6rem; color: #1f4e79; }}
+    .grid {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; align-items: start; }}
+    .cell img {{ width: 100%; height: auto; background: #fff; border: 1px solid #e2e6ea; border-radius: 4px; }}
+    .cell.empty {{ min-height: 4rem; display: flex; align-items: center; justify-content: center;
+                   color: #aaa; border: 1px dashed #ccc; border-radius: 4px; }}
+    .caption {{ color: #555; font-size: 0.92rem; margin: 0.6rem 0 0; }}
+  </style>
+</head>
+<body>
+  <h1>{title}</h1>
+  <p class="intro">{intro}</p>
+  <div class="headers">
+    <div>Observations<br><span style="font-weight:400;font-size:0.9rem">{obs_label}</span></div>
+    <div>CMIP<br><span style="font-weight:400;font-size:0.9rem">{cmip_label}</span></div>
+    <div>Observations vs CMIP</div>
+  </div>
+  {"".join(blocks)}
+</body>
+</html>
+"""
+    path.write_text(html, encoding="utf-8")
+    return path
