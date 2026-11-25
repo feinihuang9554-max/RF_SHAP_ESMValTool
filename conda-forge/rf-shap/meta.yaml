@@ -1,5 +1,3 @@
-{# Draft conda-forge recipe. Submit to conda-forge/staged-recipes AFTER the
-   matching version is on PyPI: https://pypi.org/project/rf-shap/ #}
 {% set name = "rf-shap" %}
 {% set version = "0.1.0" %}
 
@@ -8,9 +6,8 @@ package:
   version: {{ version }}
 
 source:
-  url: https://pypi.io/packages/source/{{ name[0] }}/{{ name }}/rf_shap-{{ version }}.tar.gz
-  # sha256: fill after `twine upload` / download from PyPI
-  sha256: REPLACE_AFTER_PYPI_RELEASE
+  url: https://pypi.org/packages/source/{{ name[0] }}/{{ name }}/rf_shap-{{ version }}.tar.gz
+  sha256: 2734951f83280886749a7028bbaa6851ade218904c2ec2f4c9c80b57eded3db9
 
 build:
   noarch: python
@@ -35,7 +32,6 @@ requirements:
     - scipy >=1.10
     - pyyaml >=6.0
     - matplotlib-base >=3.7
-    # optional: shap, fasttreeshap, xgboost, lightgbm
 
 test:
   imports:
@@ -48,7 +44,11 @@ test:
 
 about:
   home: https://github.com/feinihuang9554-max/RF_SHAP_ESMValTool
-  summary: Cube-native tree-ensemble and SHAP diagnosis for ESM–observation relationships
+  summary: Cube-native tree-ensemble and SHAP diagnosis for ESM-observation relationships
+  description: |
+    rf-shap learns collocated predictor-to-target mappings with tree ensembles
+    and returns skill metrics plus SHAP explanations as climate data cubes,
+    for use with ESMValTool and offline workflows.
   license: MIT
   license_file: LICENSE
   doc_url: https://github.com/feinihuang9554-max/RF_SHAP_ESMValTool
