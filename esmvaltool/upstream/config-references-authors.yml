@@ -1,0 +1,14 @@
+# Snippet to merge into ESMValTool's config-references.yml (authors: section).
+# Insert alphabetically near other "h*" entries (after hardacre_catherine / before
+# hassler_birgit is fine).
+#
+# Also patch the local conda env so overlay recipes validate before the upstream
+# PR lands:
+#   bash esmvaltool/upstream/apply_local_author_tag.sh
+
+  huang_feini:
+    name: Huang, Feini
+    institute: University of Valencia, Spain
+    email: feini.huang@uv.es
+    orcid:
+    github: feinihuang9554-max

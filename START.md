@@ -6,18 +6,26 @@ clone this repo, link it, then run recipes.
 
 ## 0. Can this go into the ESMValTool GitHub organisation?
 
-**Not as an official PR yet.** What you can do now:
+Tracked by upstream issue
+[#4609](https://github.com/ESMValGroup/ESMValTool/issues/4609).
+This repo is still an **overlay** (symlink install). Official merge needs a
+fork/PR into `ESMValGroup/ESMValTool`.
 
 | Path | Ready? |
 | --- | --- |
 | Testers clone `RF_SHAP_ESMValTool` and run recipes | Yes |
+| Upstream issue #4609 | Open (status comment + draft PR next) |
 | `pip` / conda package of ESMValTool already contains `rf_shap` | No |
-| Pull request into `ESMValGroup/ESMValTool` | Not yet |
+| Pull request into `ESMValGroup/ESMValTool` | Packaging kit in `esmvaltool/upstream/` — diagnostic + recipes; `rf_shap` as dependency (no `_vendor/`) |
 
-An official diagnostic still needs: ESMValGroup membership and CLA, files
-copied into the ESMValTool tree (not only symlinks), your name as an author
-**tag** in `config-references.yml`, Sphinx recipe docs, and a bibtex entry.
-Until that lands, send testers this file.
+To prepare the first upstream PR (demo + GPP + RST + author tag):
+
+```bash
+bash esmvaltool/upstream/apply_local_author_tag.sh   # local recipe validation
+# then follow esmvaltool/upstream/README.md
+```
+
+Until the official PR merges, send testers this file.
 
 ---
 
@@ -103,7 +111,42 @@ esmvaltool run $REPO/esmvaltool/recipes/recipe_rf_shap.yml
 
 esmvaltool run $REPO/esmvaltool/recipes/recipe_rf_shap_gpp.yml
 # ACCESS-ESM1-5 GPP vs FluxCom GPP + ERA5 drivers
+
+esmvaltool run $REPO/esmvaltool/recipes/recipe_rf_shap_cloud.yml
+# ACCESS-ESM1-5 clt vs CLARA-A3 + ERA5 drivers (after prepare_obs6_cloud.py)
+
+esmvaltool run $REPO/esmvaltool/recipes/recipe_rf_shap_ocean.yml
+# ACCESS-ESM1-5 spco2/fgco2 vs SOM-FFN + HadISST/EN4/OC-CCI chl + OceanSODA talk (1998–2014)
 ```
+
+Multi-model / XAI batch scripts (land / atmosphere / ocean parity):
+
+```bash
+# Land GPP CMIP batch + figure
+python examples/run_land_cmip_models.py
+python examples/plot_land_cmip_models.py
+
+# Land obs XAI quality + SHAP backends
+python examples/run_land_obs_xai_quality.py
+python examples/run_land_obs_shap_methods.py
+
+# Cloud CMIP batch + figure
+python examples/run_cloud_cmip_models.py
+python examples/plot_cloud_cmip_models.py
+
+# Atmosphere obs XAI quality + SHAP backends
+python examples/run_atmos_obs_xai_quality.py
+python examples/run_atmos_obs_shap_methods.py
+
+# Ocean spCO2 CMIP batch + figure (1° remesh; needs chl/talk)
+python examples/run_ocean_cmip_models.py
+python examples/plot_ocean_cmip_models.py
+
+# Ocean obs XAI quality + SHAP backends
+python examples/run_ocean_obs_xai_quality.py
+python examples/run_ocean_obs_shap_methods.py
+```
+
 
 Outputs: `~/esmvaltool_output/<recipe>_<timestamp>/`
 

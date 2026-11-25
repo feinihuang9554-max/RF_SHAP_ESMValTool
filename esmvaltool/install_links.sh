@@ -13,12 +13,16 @@ fi
 SITE="$("$PYTHON" -c "import esmvaltool, pathlib; print(pathlib.Path(esmvaltool.__file__).parent)")"
 
 mkdir -p "$SITE/diag_scripts" "$SITE/recipes"
+# Replace any previous directory/symlink cleanly (avoid ln nesting into an existing dir).
+rm -rf "$SITE/diag_scripts/rf_shap"
 ln -sfn "$ROOT/esmvaltool/diag_scripts/rf_shap" "$SITE/diag_scripts/rf_shap"
+rm -rf "$SITE/rf_shap"
 ln -sfn "$ROOT/esmvaltool/python_api" "$SITE/rf_shap"
 ln -sfn "$ROOT/esmvaltool/recipes/recipe_rf_shap.yml" "$SITE/recipes/recipe_rf_shap.yml"
 ln -sfn "$ROOT/esmvaltool/recipes/recipe_rf_shap_demo.yml" "$SITE/recipes/recipe_rf_shap_demo.yml"
 ln -sfn "$ROOT/esmvaltool/recipes/recipe_rf_shap_gpp.yml" "$SITE/recipes/recipe_rf_shap_gpp.yml"
 ln -sfn "$ROOT/esmvaltool/recipes/recipe_rf_shap_cloud.yml" "$SITE/recipes/recipe_rf_shap_cloud.yml"
+ln -sfn "$ROOT/esmvaltool/recipes/recipe_rf_shap_ocean.yml" "$SITE/recipes/recipe_rf_shap_ocean.yml"
 
 "$PYTHON" -m pip install -e "$ROOT[explain]"
 
@@ -41,8 +45,10 @@ echo "Linked recipes     -> $SITE/recipes/recipe_rf_shap.yml"
 echo "                     $SITE/recipes/recipe_rf_shap_demo.yml"
 echo "                     $SITE/recipes/recipe_rf_shap_gpp.yml"
 echo "                     $SITE/recipes/recipe_rf_shap_cloud.yml"
+echo "                     $SITE/recipes/recipe_rf_shap_ocean.yml"
 echo "Smoke test (no climate files): esmvaltool run recipe_rf_shap_demo.yml"
 echo "CMIP tas example:              esmvaltool run recipe_rf_shap.yml"
 echo "CMIP GPP vs FluxCom/ERA5:      esmvaltool run recipe_rf_shap_gpp.yml"
 echo "CMIP clt vs ERA5:              esmvaltool run recipe_rf_shap_cloud.yml"
+echo "CMIP spco2 vs SOM-FFN:         esmvaltool run recipe_rf_shap_ocean.yml"
 echo "If recipes are not found by name, pass the path under $ROOT/esmvaltool/recipes/"
